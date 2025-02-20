@@ -132,7 +132,7 @@
           player.direction = { dx: 0, dy: -1 };
         }
       }
-      // Aktualisiere die Referenzposition, damit sich die Steuerung flüssig anfühlt
+      // Aktualisiere die Referenzposition für flüssige Steuerung
       touchX = touch.clientX;
       touchY = touch.clientY;
       e.preventDefault();
@@ -248,9 +248,9 @@
       }
     }
 
-    // Bild für den Apfel laden – Ersetze den Link durch deinen eigenen
+    // Bild für den Apfel laden – Hier den gegebenen Link einfügen
     const appleImage = new Image();
-    appleImage.src = "https://example.com/apple.png"; // Platzhalter-Link
+    appleImage.src = "https://i.ibb.co/YTfFdFqZ/7e89b4f2-893c-4024-95ec-0e8d43cca844.png";
 
     // Zeichnet eine Zelle als Kreis (für Spieler und Bots)
     function drawCell(x, y, color) {
@@ -266,20 +266,24 @@
     function draw() {
       ctx.fillStyle = "#222";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // Äpfel zeichnen als Bild
+      
+      // Äpfel zeichnen als Bild – Größe kleiner als die Zelle (z.B. 16x16 bei cellSize=20)
+      let appleSize = cellSize - 4; // 16 Pixel
+      let offset = (cellSize - appleSize) / 2;
       apples.forEach(apple => {
         if(appleImage.complete){
-          ctx.drawImage(appleImage, apple.x * cellSize, apple.y * cellSize, cellSize, cellSize);
+          ctx.drawImage(appleImage, apple.x * cellSize + offset, apple.y * cellSize + offset, appleSize, appleSize);
         } else {
-          // Fallback: Grünes Rechteck
           ctx.fillStyle = "green";
           ctx.fillRect(apple.x * cellSize, apple.y * cellSize, cellSize, cellSize);
         }
       });
+      
       // Spieler-Snake zeichnen (blau)
       player.snake.forEach(seg => {
         drawCell(seg.x, seg.y, "blue");
       });
+      
       // Bot-Snakes zeichnen (rot) mit Score-Anzeige
       bots.forEach(bot => {
         bot.snake.forEach(seg => {
@@ -289,6 +293,7 @@
         ctx.font = "12px Arial";
         ctx.fillText(bot.snake.length, bot.snake[0].x * cellSize, bot.snake[0].y * cellSize);
       });
+      
       // Spieler-Score
       ctx.fillStyle = "white";
       ctx.font = "20px Arial";
