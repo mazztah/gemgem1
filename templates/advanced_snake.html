@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Advanced Snake Game – Touch & Bild-Äpfel</title>
+  <title>Advanced Snake Game – 360° Touch & Bild-Äpfel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { 
@@ -25,46 +25,57 @@
 <body>
   <canvas id="gameCanvas" width="1200" height="800"></canvas>
   <script>
-    // GRID- UND SPIELKONFIGURATION
+    // CONFIGURATION
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const cellSize = 20;
-    const gridWidth = canvas.width / cellSize;   // z.B. 60 Zellen horizontal
-    const gridHeight = canvas.height / cellSize;  // z.B. 40 Zellen vertikal
-    const TICK_INTERVAL = 150;       // Zeit in ms pro Zug
-    const TARGET_APPLE_COUNT = 50;   // Es sollen immer ca. 50 Äpfel vorhanden sein
-    const MAX_BOTS = 10;             // Max. Anzahl der Bots
-    const BOT_SPAWN_INTERVAL = 15000; // Neuer Bot alle 15 Sek.
+    const gridWidth = canvas.width / cellSize;
+    const gridHeight = canvas.height / cellSize;
+    const TICK_INTERVAL = 150;       // ms per tick
+    const TARGET_APPLE_COUNT = 50;
+    const MAX_BOTS = 10;
+    const BOT_SPAWN_INTERVAL = 15000;
+    const TOUCH_THRESHOLD = 5;       // Minimaler Pixelversatz, um Richtungsänderung auszulösen
+
+    // Bilder
+    const appleImage = new Image();
+    appleImage.src = "https://i.ibb.co/YTfFdFqZ/7e89b4f2-893c-4024-95ec-0e8d43cca844.png";
+    const botHeadImage = new Image();
+    botHeadImage.src = "https://i.ibb.co/chrtCC8z/19ed4cd6-ced8-46d8-a4ab-84a46003d629.png";
 
     let apples = [];
     let bots = [];
     let gameOver = false;
     let lastBotSpawnTime = Date.now();
 
-    // Spieler-Snake (als Array von Segmenten – jedes Segment hat x,y)
+    // Spieler-Snake: Positionen als Fließkommazahlen
     let player = {
       snake: [
-        { x: Math.floor(gridWidth/2), y: Math.floor(gridHeight/2) },
-        { x: Math.floor(gridWidth/2)-1, y: Math.floor(gridHeight/2) },
-        { x: Math.floor(gridWidth/2)-2, y: Math.floor(gridHeight/2) }
+        { x: gridWidth/2, y: gridHeight/2 },
+        { x: gridWidth/2 - 1, y: gridHeight/2 },
+        { x: gridWidth/2 - 2, y: gridHeight/2 }
       ],
-      direction: { dx: 1, dy: 0 }  // Startbewegung nach rechts
+      // Standardrichtung: nach rechts (als normalisierter Vektor)
+      direction: { dx: 1, dy: 0 },
+      speed: 1  // Geschwindigkeit in "Zellen pro Tick"
     };
 
-    // Bot-Snake: Jeder Bot ist ein Objekt mit eigener Snake und Richtung
+    // Bot-Snake: Jeder Bot hat eine eigene Snake und Richtung (360° möglich)
     function createBot() {
-      let startX = Math.floor(Math.random() * gridWidth);
-      let startY = Math.floor(Math.random() * gridHeight);
+      let startX = Math.random() * gridWidth;
+      let startY = Math.random() * gridHeight;
       return {
         snake: [
           { x: startX, y: startY },
           { x: startX - 1, y: startY }
         ],
-        direction: { dx: 1, dy: 0 }
+        // Initiale Richtung: zufällig
+        direction: { dx: Math.cos(Math.random()*2*Math.PI), dy: Math.sin(Math.random()*2*Math.PI) },
+        speed: 0.5 + Math.random() * 0.5
       };
     }
 
-    // Apfel spawnen: zufällige Zelle
+    // Apfel spawnen: zufällige Gitterposition (ganzzahlig)
     function spawnApple() {
       let apple = {
         x: Math.floor(Math.random() * gridWidth),
@@ -72,14 +83,11 @@
       };
       apples.push(apple);
     }
-    // Immer genügend Äpfel sicherstellen
     function ensureApples() {
       while(apples.length < TARGET_APPLE_COUNT) {
         spawnApple();
       }
     }
-
-    // Initialisierung: Äpfel und einige Bots erzeugen
     function initGame() {
       apples = [];
       bots = [];
@@ -89,146 +97,147 @@
       }
     }
 
-    // Steuerung: Pfeiltasten für Desktop
+    // Steuerung für Desktop (Pfeiltasten bleiben erhalten, allerdings
+    // werden hier nur Standardrichtungen genutzt – für 360°-Steuerung primär Touch)
     document.addEventListener("keydown", e => {
       switch(e.key) {
         case "ArrowUp":
-          if(player.direction.dy !== 1) player.direction = { dx: 0, dy: -1 };
+          player.direction = { dx: 0, dy: -1 };
           break;
         case "ArrowDown":
-          if(player.direction.dy !== -1) player.direction = { dx: 0, dy: 1 };
+          player.direction = { dx: 0, dy: 1 };
           break;
         case "ArrowLeft":
-          if(player.direction.dx !== 1) player.direction = { dx: -1, dy: 0 };
+          player.direction = { dx: -1, dy: 0 };
           break;
         case "ArrowRight":
-          if(player.direction.dx !== -1) player.direction = { dx: 1, dy: 0 };
+          player.direction = { dx: 1, dy: 0 };
           break;
       }
     });
-    
-    // Touch-Steuerung: Kontinuierliche Richtungssteuerung per Fingerbewegung
-    let touchX = 0, touchY = 0;
+
+    // Touch-Steuerung: Nur bei tatsächlicher Bewegung wird die Richtung neu berechnet.
+    let touchStartX = 0, touchStartY = 0;
+    let touchActive = false;
     canvas.addEventListener("touchstart", e => {
       let touch = e.touches[0];
-      touchX = touch.clientX;
-      touchY = touch.clientY;
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchActive = true;
     });
     canvas.addEventListener("touchmove", e => {
+      if(!touchActive) return;
       let touch = e.touches[0];
-      let dx = touch.clientX - touchX;
-      let dy = touch.clientY - touchY;
-      // Bestimme die dominierende Richtung
-      if(Math.abs(dx) > Math.abs(dy)){
-        if(dx > 0 && player.direction.dx !== -1) {
-          player.direction = { dx: 1, dy: 0 };
-        } else if(dx < 0 && player.direction.dx !== 1) {
-          player.direction = { dx: -1, dy: 0 };
-        }
-      } else {
-        if(dy > 0 && player.direction.dy !== -1) {
-          player.direction = { dx: 0, dy: 1 };
-        } else if(dy < 0 && player.direction.dy !== 1) {
-          player.direction = { dx: 0, dy: -1 };
-        }
+      let dx = touch.clientX - touchStartX;
+      let dy = touch.clientY - touchStartY;
+      if(Math.hypot(dx, dy) >= TOUCH_THRESHOLD) {
+        let angle = Math.atan2(dy, dx);
+        player.direction = { dx: Math.cos(angle), dy: Math.sin(angle) };
+        // Update Referenzposition, damit nur relative Bewegungen zählen:
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
       }
-      // Aktualisiere die Referenzposition für flüssige Steuerung
-      touchX = touch.clientX;
-      touchY = touch.clientY;
       e.preventDefault();
     });
+    canvas.addEventListener("touchend", () => {
+      touchActive = false;
+    });
 
-    // HELFER: Wrap-Around am Spielfeldrand
+    // Wrap-Around: Bei Überschreiten des Spielfelds taucht man am gegenüberliegenden Rand auf.
     function wrapPosition(pos) {
-      if(pos.x < 0) pos.x = gridWidth - 1;
-      if(pos.x >= gridWidth) pos.x = 0;
-      if(pos.y < 0) pos.y = gridHeight - 1;
-      if(pos.y >= gridHeight) pos.y = 0;
+      if(pos.x < 0) pos.x += gridWidth;
+      if(pos.x >= gridWidth) pos.x -= gridWidth;
+      if(pos.y < 0) pos.y += gridHeight;
+      if(pos.y >= gridHeight) pos.y -= gridHeight;
     }
 
-    // Verschiebe eine Snake: Neuer Kopf wird hinzugefügt; wenn nicht gewachsen wird das letzte Segment entfernt
-    function moveSnake(snake, direction, grow) {
+    // Verschiebe eine Snake: Neuer Kopf wird hinzugefügt. Wenn sie nicht "wachsen" soll, wird das letzte Segment entfernt.
+    function moveSnake(snake, direction, speed, grow) {
       let head = snake[0];
-      let newHead = { x: head.x + direction.dx, y: head.y + direction.dy };
+      let newHead = { 
+        x: head.x + direction.dx * speed, 
+        y: head.y + direction.dy * speed 
+      };
       wrapPosition(newHead);
       snake.unshift(newHead);
       if(!grow) snake.pop();
     }
 
-    // Spieler aktualisieren
+    // Spieler aktualisieren: Bewegungsrichtung wird angewendet, Apfelkollision über Distanzprüfung.
     function updatePlayer() {
       let head = player.snake[0];
-      let newHead = { x: head.x + player.direction.dx, y: head.y + player.direction.dy };
+      let newHead = { 
+        x: head.x + player.direction.dx * player.speed, 
+        y: head.y + player.direction.dy * player.speed 
+      };
       wrapPosition(newHead);
-      // Prüfe, ob ein Apfel getroffen wurde
       let ateApple = false;
       for(let i = 0; i < apples.length; i++){
-        if(apples[i].x === newHead.x && apples[i].y === newHead.y){
+        if(Math.hypot(apples[i].x - newHead.x, apples[i].y - newHead.y) < 0.5) {
           ateApple = true;
           apples.splice(i, 1);
           break;
         }
       }
-      moveSnake(player.snake, player.direction, ateApple);
+      moveSnake(player.snake, player.direction, player.speed, ateApple);
     }
 
-    // Bots aktualisieren: Jeder Bot sucht sich das nächstgelegene Apfelziel
+    // Bots aktualisieren: Jeder Bot sucht den nächsten Apfel und berechnet einen 360°-Winkel.
     function updateBots() {
       bots.forEach(bot => {
         let head = bot.snake[0];
         let target = null, minDist = Infinity;
         apples.forEach(apple => {
-          let d = Math.abs(apple.x - head.x) + Math.abs(apple.y - head.y);
-          if(d < minDist){
+          let d = Math.hypot(apple.x - head.x, apple.y - head.y);
+          if(d < minDist) {
             minDist = d;
             target = apple;
           }
         });
         if(target) {
-          let dx = target.x - head.x;
-          let dy = target.y - head.y;
-          if(Math.abs(dx) > Math.abs(dy))
-            bot.direction = { dx: dx > 0 ? 1 : -1, dy: 0 };
-          else
-            bot.direction = { dx: 0, dy: dy > 0 ? 1 : -1 };
+          let angle = Math.atan2(target.y - head.y, target.x - head.x);
+          bot.direction = { dx: Math.cos(angle), dy: Math.sin(angle) };
         }
-        let nextHead = { x: head.x + bot.direction.dx, y: head.y + bot.direction.dy };
+        let nextHead = { 
+          x: head.x + bot.direction.dx * bot.speed, 
+          y: head.y + bot.direction.dy * bot.speed 
+        };
         wrapPosition(nextHead);
         let ateApple = false;
         for(let i = 0; i < apples.length; i++){
-          if(apples[i].x === nextHead.x && apples[i].y === nextHead.y){
+          if(Math.hypot(apples[i].x - nextHead.x, apples[i].y - nextHead.y) < 0.5) {
             ateApple = true;
             apples.splice(i, 1);
             break;
           }
         }
-        moveSnake(bot.snake, bot.direction, ateApple);
+        moveSnake(bot.snake, bot.direction, bot.speed, ateApple);
       });
     }
 
-    // Kollisionen prüfen: Spieler vs. Bots und Bots untereinander
+    // Kollisionsprüfung: Spieler vs. Bots sowie Bots untereinander. Wird der Kopf kollidieren, "frisst" der längere Snake-Körper den kleineren.
     function checkCollisions() {
       let pHead = player.snake[0];
       bots.forEach((bot, index) => {
         let bHead = bot.snake[0];
-        if(pHead.x === bHead.x && pHead.y === bHead.y){
-          if(player.snake.length > bot.snake.length){
-            // Spieler frisst den Bot – füge so viele Segmente hinzu wie der Bot lang ist
+        if(Math.hypot(pHead.x - bHead.x, pHead.y - bHead.y) < 0.5) {
+          if(player.snake.length > bot.snake.length) {
+            // Spieler frisst den Bot: Hänge so viele Segmente an den Spieler an wie der Bot hat.
             for(let i = 0; i < bot.snake.length; i++){
               player.snake.push({ ...player.snake[player.snake.length - 1] });
             }
             bots.splice(index, 1);
-          } else if(player.snake.length < bot.snake.length){
+          } else if(player.snake.length < bot.snake.length) {
             gameOver = true;
           }
         }
       });
-      // Bots untereinander
+      // Bots untereinander:
       for(let i = 0; i < bots.length; i++){
         for(let j = i + 1; j < bots.length; j++){
           let headA = bots[i].snake[0];
           let headB = bots[j].snake[0];
-          if(headA.x === headB.x && headA.y === headB.y){
+          if(Math.hypot(headA.x - headB.x, headA.y - headB.y) < 0.5){
             if(bots[i].snake.length > bots[j].snake.length){
               for(let k = 0; k < bots[j].snake.length; k++){
                 bots[i].snake.push({ ...bots[i].snake[bots[i].snake.length - 1] });
@@ -248,11 +257,7 @@
       }
     }
 
-    // Bild für den Apfel laden – Hier den gegebenen Link einfügen
-    const appleImage = new Image();
-    appleImage.src = "https://i.ibb.co/YTfFdFqZ/7e89b4f2-893c-4024-95ec-0e8d43cca844.png";
-
-    // Zeichnet eine Zelle als Kreis (für Spieler und Bots)
+    // Zeichnet eine Zelle als Kreis – für Spieler und den Schwanz der Bots.
     function drawCell(x, y, color) {
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -267,8 +272,8 @@
       ctx.fillStyle = "#222";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Äpfel zeichnen als Bild – Größe kleiner als die Zelle (z.B. 16x16 bei cellSize=20)
-      let appleSize = cellSize - 4; // 16 Pixel
+      // Äpfel zeichnen als Bild, skaliert (z. B. 16x16 bei cellSize=20)
+      let appleSize = cellSize - 4;
       let offset = (cellSize - appleSize) / 2;
       apples.forEach(apple => {
         if(appleImage.complete){
@@ -284,14 +289,23 @@
         drawCell(seg.x, seg.y, "blue");
       });
       
-      // Bot-Snakes zeichnen (rot) mit Score-Anzeige
+      // Bot-Snakes zeichnen:
       bots.forEach(bot => {
-        bot.snake.forEach(seg => {
-          drawCell(seg.x, seg.y, "red");
-        });
+        // Zeichne den Kopf des Bots mit dem Bild, falls geladen
+        let head = bot.snake[0];
+        if(botHeadImage.complete){
+          ctx.drawImage(botHeadImage, head.x * cellSize + offset, head.y * cellSize + offset, appleSize, appleSize);
+        } else {
+          drawCell(head.x, head.y, "red");
+        }
+        // Zeichne den Rest der Bot-Snake als Kreise
+        for(let i = 1; i < bot.snake.length; i++){
+          drawCell(bot.snake[i].x, bot.snake[i].y, "red");
+        }
+        // Zeige den Score (Länge) des Bots an
         ctx.fillStyle = "white";
         ctx.font = "12px Arial";
-        ctx.fillText(bot.snake.length, bot.snake[0].x * cellSize, bot.snake[0].y * cellSize);
+        ctx.fillText(bot.snake.length, head.x * cellSize, head.y * cellSize);
       });
       
       // Spieler-Score
